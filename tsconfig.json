@@ -3,7 +3,6 @@
   "display": "Node 22",
 
   "include": ["src"],
-  "exclude": ["vitest.config.mts"],
 
   "compilerOptions": {
     "lib": ["es2021"],

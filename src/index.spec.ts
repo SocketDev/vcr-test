@@ -4,13 +4,13 @@ import { RecordMode, VCR } from './index';
 import { FileStorage } from "./file-storage";
 import { unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { describe, it, expect } from 'vitest';
+import { test } from 'tap';
 
 const CASSETTES_DIR = join(__dirname, '__cassettes__');
 
-describe('cassette', () => {
-  describe('ClientRequest', () => {
-    it('records multiple HTTP calls', async () => {
+test('cassette', async (t) => {
+  t.test('ClientRequest', async (t) => {
+    t.test('records multiple HTTP calls', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       vcr.requestMasker = (req) => {
         req.headers['user-agent'] = '****';
@@ -30,9 +30,10 @@ describe('cassette', () => {
           }
         });
       });
-    }, 5000000);
+      t.pass();
+    });
 
-    it('records gzipped data as base64', async () => {
+    t.test('records gzipped data as base64', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       vcr.requestMasker = (req) => {
         req.headers['user-agent'] = '****';
@@ -45,9 +46,10 @@ describe('cassette', () => {
           }
         });
       });
-    }, 5000000);
+      t.pass();
+    });
 
-    it('does not record when request is marked as pass-through', async () => {
+    t.test('does not record when request is marked as pass-through', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       vcr.requestPassThrough = (req) => {
         return req.url === 'https://httpbin.org/put';
@@ -67,9 +69,10 @@ describe('cassette', () => {
           }
         });
       });
-    }, 5000000);
+      t.pass();
+    });
 
-    it('records new calls', async () => {
+    t.test('records new calls', async (t) => {
       const cassette = join(CASSETTES_DIR, 'client_request_new_calls.yaml');
       if (existsSync(cassette)) {
         await unlink(cassette);
@@ -85,7 +88,7 @@ describe('cassette', () => {
           }
         });
 
-        expect(body.data).toMatchInlineSnapshot(`"{"name":"alex"}"`);
+        t.equal(body.data, '{"name":"alex"}');
       });
 
       vcr.mode = RecordMode.update;
@@ -97,13 +100,13 @@ describe('cassette', () => {
           }
         });
         
-        expect(body.data).toMatchInlineSnapshot(`"{"name":"alex-update"}"`);
+        t.equal(body.data, '{"name":"alex-update"}');
       });
-    }, 5000000);
+    });
   });
 
-  describe('fetch', () => {
-    it('records the same HTTP call multiple times', async () => {
+  t.test('fetch', async (t) => {
+    t.test('records the same HTTP call multiple times', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       vcr.requestMasker = (req) => {
         req.headers['user-agent'] = '****';
@@ -125,9 +128,10 @@ describe('cassette', () => {
           }
         });
       });
-    }, 5000000);
+      t.pass();
+    });
   
-    it('records gzipped data as base64', async () => {
+    t.test('records gzipped data as base64', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       vcr.requestMasker = (req) => {
         req.headers['user-agent'] = '****';
@@ -141,9 +145,10 @@ describe('cassette', () => {
           }
         });
       });
-    }, 5000000);
+      t.pass();
+    });
 
-    it('can record gzip from S3 as base64', async () => {
+    t.test('can record gzip from S3 as base64', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       await vcr.useCassette('fetch_gzipped_data_stored_as_base64_from_s3', async () => {
         const res = await fetch('https://crates.io/api/v1/crates/serde/1.0.219/download', {
@@ -160,12 +165,12 @@ describe('cassette', () => {
         const base64 = Buffer.from(body).toString('base64')
         console.log(base64.slice(0, 100))
 
-        expect(base64.slice(0, 10)).toEqual('H4sICAAAAA')
-        expect(base64.slice(-10)).toEqual('+W2QBgCAA=')
+        t.equal(base64.slice(0, 10), 'H4sICAAAAA');
+        t.equal(base64.slice(-10), '+W2QBgCAA=');
       })
-    }, 5000000);
+    });
 
-    it('does not record when request is marked as pass-through', async () => {
+    t.test('does not record when request is marked as pass-through', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       vcr.requestPassThrough = (req) => {
         return req.url === 'https://httpbin.org/put';
@@ -189,9 +194,10 @@ describe('cassette', () => {
           body: JSON.stringify({name: 'alex'})
         });
       });
-    }, 5000000);
+      t.pass();
+    });
 
-    it('records new calls', async () => {
+    t.test('records new calls', async (t) => {
       const cassette = join(CASSETTES_DIR, 'fetch_new_calls.yaml');
       if (existsSync(cassette)) {
         await unlink(cassette);
@@ -209,7 +215,7 @@ describe('cassette', () => {
           body: JSON.stringify({name: 'alex'})
         }).then(res => res.json());
 
-        expect(body.data).toMatchInlineSnapshot(`"{"name":"alex"}"`);
+        t.equal(body.data, '{"name":"alex"}');
       });
 
       vcr.mode = RecordMode.update;
@@ -223,8 +229,8 @@ describe('cassette', () => {
           body: JSON.stringify({name: 'alex-update'})
         }).then(res => res.json());
 
-        expect(body.data).toMatchInlineSnapshot(`"{"name":"alex-update"}"`);
+        t.equal(body.data, '{"name":"alex-update"}');
       });
-    }, 5000000);
+    });
   });
 });
