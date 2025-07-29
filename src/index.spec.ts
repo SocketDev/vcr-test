@@ -1,10 +1,36 @@
-import axios from 'axios';
+import { test } from 'tap';
 import { join } from 'node:path';
 import { RecordMode, VCR } from './index';
 import { FileStorage } from "./file-storage";
 import { unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { test } from 'tap';
+
+// Helper functions to match axios API signature, minimizing the diff with the original code
+async function fetchPost(url: string, data: string, config?: any) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: config?.headers,
+    body: data
+  });
+  return { data: await response.json() };
+}
+
+async function fetchGet(url: string, config?: any) {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: config?.headers
+  });
+  return { data: await response.json() };
+}
+
+async function fetchPut(url: string, data: string, config?: any) {
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: config?.headers,
+    body: data
+  });
+  return { data: await response.json() };
+}
 
 const CASSETTES_DIR = join(__dirname, '__cassettes__');
 
@@ -16,14 +42,14 @@ test('cassette', async (t) => {
         req.headers['user-agent'] = '****';
       };
       await vcr.useCassette('client_request_multiple_http_calls', async () => {
-        await axios.post('https://httpbin.org/post', JSON.stringify({name: 'alex'}), {
+        await fetchPost('https://httpbin.org/post', JSON.stringify({name: 'alex'}), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           }
         });
   
-        await axios.post('https://httpbin.org/post', JSON.stringify({name: 'yane'}), {
+        await fetchPost('https://httpbin.org/post', JSON.stringify({name: 'yane'}), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
@@ -39,7 +65,7 @@ test('cassette', async (t) => {
         req.headers['user-agent'] = '****';
       };
       await vcr.useCassette('client_request_gzipped_data_stored_as_base64', async () => {
-        await axios.get('https://httpbin.org/gzip', {
+        await fetchGet('https://httpbin.org/gzip', {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
@@ -55,14 +81,14 @@ test('cassette', async (t) => {
         return req.url === 'https://httpbin.org/put';
       };
       await vcr.useCassette('client_request_pass_through_calls', async () => {
-        await axios.put('https://httpbin.org/put', JSON.stringify({name: 'alex'}), {
+        await fetchPut('https://httpbin.org/put', JSON.stringify({name: 'alex'}), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           }
         });
 
-        await axios.post('https://httpbin.org/post', JSON.stringify({name: 'john'}), {
+        await fetchPost('https://httpbin.org/post', JSON.stringify({name: 'john'}), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
@@ -81,7 +107,7 @@ test('cassette', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       vcr.mode = RecordMode.once;
       await vcr.useCassette('client_request_new_calls', async () => {
-        const { data: body } = await axios.post('https://httpbin.org/post', JSON.stringify({name: 'alex'}), {
+        const { data: body } = await fetchPost('https://httpbin.org/post', JSON.stringify({name: 'alex'}), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
@@ -93,7 +119,7 @@ test('cassette', async (t) => {
 
       vcr.mode = RecordMode.update;
       await vcr.useCassette('client_request_new_calls', async () => {
-        const { data: body} = await axios.post('https://httpbin.org/post', JSON.stringify({name: 'alex-update'}), {
+        const { data: body} = await fetchPost('https://httpbin.org/post', JSON.stringify({name: 'alex-update'}), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
@@ -112,16 +138,14 @@ test('cassette', async (t) => {
         req.headers['user-agent'] = '****';
       };
       await vcr.useCassette('fetch_same_http_call_multiple_times', async () => {
-        await axios.post('https://httpbin.org/post', JSON.stringify({ name: 'alex' }), {
-          adapter: 'fetch',
+        await fetchPost('https://httpbin.org/post', JSON.stringify({ name: 'alex' }), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           }
         });
   
-        await axios.post('https://httpbin.org/post', JSON.stringify({ name: 'alex' }), {
-          adapter: 'fetch',
+        await fetchPost('https://httpbin.org/post', JSON.stringify({ name: 'alex' }), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
@@ -137,8 +161,7 @@ test('cassette', async (t) => {
         req.headers['user-agent'] = '****';
       };
       await vcr.useCassette('fetch_gzipped_data_stored_as_base64', async () => {
-        await axios.get('https://httpbin.org/gzip', {
-          adapter: 'fetch',
+        await fetchGet('https://httpbin.org/gzip', {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
@@ -185,13 +208,11 @@ test('cassette', async (t) => {
           body: JSON.stringify({name: 'alex'})
         });
 
-        await axios.post('https://httpbin.org/post', {
+        await fetchPost('https://httpbin.org/post', JSON.stringify({name: 'alex'}), {
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-          },
-          method: 'POST',
-          body: JSON.stringify({name: 'alex'})
+          }
         });
       });
       t.pass();

@@ -21,7 +21,6 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "24.0.3",
-    "axios": "1.10.0",
     "tap": "^18.0.0",
     "typescript": "5.0.4"
   },
