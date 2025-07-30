@@ -5,7 +5,7 @@
       "type": "node",
       "request": "launch",
       "name": "Debug Test File",
-      "runtimeExecutable": "npm",
+      "runtimeExecutable": "pnpm",
       "args": [
         "run",
         "test",

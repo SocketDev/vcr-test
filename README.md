@@ -9,6 +9,8 @@ This is a fork of [epignosisx/vcr-test](https://github.com/epignosisx/vcr-test)
 
 ```bash
 npm install socket-vcr-test --save-dev
+# or
+pnpm add socket-vcr-test --save-dev
 ```
 
 ## Usage
