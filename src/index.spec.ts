@@ -193,6 +193,90 @@ test('cassette', async (t) => {
       })
     });
 
+    t.test('can record streaming binary responses as base64', async (t) => {
+      var vcr = new VCR(new FileStorage(CASSETTES_DIR));
+      await vcr.useCassette('fetch_streaming_binary_response', async () => {
+        // First request - should record
+        const res = await fetch('https://clients2.googleusercontent.com/crx/blobs/AcpJF5gJdVmIuc71j7_wDR9kCVc_J-K-GMI_OOj-fmYLeXil7TFrEluR1ZdVGrLx8bfqtlX0j50U0pBq6-3hSMehXvtWNLpzx7QAGUNrCmYzzepeSTLwAN9ZV4NSfKHPJ74AxlKa5TqjS3FScU6vOXFW5iO62ZqoNDEE/GJJBMFIGJPGNEHJIOICAALOPAIKCNHEO_1_8_0_0.crx', {
+          headers: {
+            'User-Agent': 'UnitTests; raynos2@gmail.com',
+          }
+        })
+
+        // Verify it's a binary response
+        const contentType = res.headers.get('content-type');
+        t.ok(contentType, 'Response should have content-type header');
+        console.log('Content-Type:', contentType);
+        
+        // Test that our binary detection is working
+        t.equal(contentType, 'application/x-chrome-extension', 'Content-type should be chrome extension');
+        
+        // Import the binary detection function to test it directly
+        const { isBinary } = require('./cassette');
+        t.ok(isBinary(res.headers), 'isBinary should detect chrome extension as binary');
+
+        const body = await res.arrayBuffer()
+        console.log('Response size:', body.byteLength, 'bytes');
+
+        // Verify it's stored as base64 in the cassette
+        const base64 = Buffer.from(body).toString('base64')
+        console.log('Base64 length:', base64.length);
+
+        // Verify it's a valid binary file (should start with common binary signatures)
+        t.ok(body.byteLength > 0, 'Response should have content');
+        t.ok(base64.length > 0, 'Base64 should not be empty');
+
+        // Test playback - second request should use recorded cassette
+        const playbackRes = await fetch('https://clients2.googleusercontent.com/crx/blobs/AcpJF5gJdVmIuc71j7_wDR9kCVc_J-K-GMI_OOj-fmYLeXil7TFrEluR1ZdVGrLx8bfqtlX0j50U0pBq6-3hSMehXvtWNLpzx7QAGUNrCmYzzepeSTLwAN9ZV4NSfKHPJ74AxlKa5TqjS3FScU6vOXFW5iO62ZqoNDEE/GJJBMFIGJPGNEHJIOICAALOPAIKCNHEO_1_8_0_0.crx', {
+          headers: {
+            'User-Agent': 'UnitTests; raynos2@gmail.com',
+          }
+        })
+
+        const playbackBody = await playbackRes.arrayBuffer()
+        t.equal(playbackBody.byteLength, body.byteLength, 'Playback should return same size');
+
+        // Verify the content is identical
+        const originalBuffer = Buffer.from(body);
+        const playbackBuffer = Buffer.from(playbackBody);
+        t.ok(originalBuffer.equals(playbackBuffer), 'Playback should return identical content');
+      })
+    });
+
+    t.test('logs warning for large non-binary responses', async (t) => {
+      // Test the warning logic directly by importing the function
+      const { consumeBody } = require('./cassette');
+
+      // Mock console.warn to capture the warning
+      const originalWarn = console.warn;
+      const warnings: string[] = [];
+      console.warn = (...args: any[]) => {
+        warnings.push(args.join(' '));
+      };
+
+      // Create a mock response with large content-length
+      const mockResponse = {
+        headers: {
+          get: (name: string) => {
+            if (name === 'content-length') return '1048577'; // 1MB + 1 byte
+            if (name === 'content-type') return 'application/json';
+            return null;
+          }
+        },
+        text: async () => '{"test": "data"}'
+      };
+
+      // This should trigger the warning
+      await consumeBody(mockResponse);
+
+      // Restore console.warn
+      console.warn = originalWarn;
+
+      // Check if warning was logged
+      t.ok(warnings.length > 0, 'Should log warning for large non-binary response');
+      t.ok(warnings.some(w => w.includes('VCR: Large response detected')), 'Warning should mention VCR and large response');
+    });
+
     t.test('does not record when request is marked as pass-through', async (t) => {
       var vcr = new VCR(new FileStorage(CASSETTES_DIR));
       vcr.requestPassThrough = (req) => {

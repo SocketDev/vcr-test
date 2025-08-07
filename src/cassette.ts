@@ -131,7 +131,7 @@ export class Cassette {
     this.usedInteractions.add(match);
 
     let body: string | Readable = match.response.body;
-    if (isGzippedMatch(match.response.headers)) {
+    if (isBinaryMatch(match.response.headers)) {
       const readable = new Readable();
       readable._read = () => {};
       readable.push(Buffer.from(match.response.body, 'base64'));
@@ -211,24 +211,76 @@ export function responseToHttpResponse(response: any, body: string): HttpRespons
   }
 }
 
-async function consumeBody(req: Request | Response) {
-  if (isGzipped(req.headers)) {
+export async function consumeBody(req: Request | Response) {
+  if (isBinary(req.headers)) {
     return Buffer.from(await req.arrayBuffer()).toString('base64');
   } else {
+    const contentType = req.headers.get('content-type') ?? '???';
+    const contentLength = req.headers.get('content-length');
+    
+    // Log potential streaming responses that aren't covered
+    if (contentLength && parseInt(contentLength) > 1024 * 1024) { // > 1MB
+      console.warn(`VCR: Large response detected (${contentLength} bytes) with content-type: ${contentType}. Consider adding this content-type to binary detection if it's a streaming response.`);
+    }
+    
     return await req.text()
   }
 }
 
-function isGzippedMatch(headers: Record<string, string>): boolean {
+function isBinaryMatch(headers: Record<string, string>): boolean {
   const encodingHeader = headers['content-encoding'] ?? '';
   const contentHeader = headers['content-type'] ?? '';
-  return encodingHeader.indexOf('gzip') >= 0 ||
-    contentHeader.indexOf('gzip') >= 0;
+  
+  // Check for gzip encoding
+  if (encodingHeader.indexOf('gzip') >= 0 || contentHeader.indexOf('gzip') >= 0) {
+    return true;
+  }
+  
+  // Check for common binary content types
+  const binaryContentTypes = [
+    'application/octet-stream',
+    'application/x-binary',
+    'application/x-chrome-extension',
+    'application/x-executable',
+    'application/x-msdownload',
+    'application/zip',
+    'application/x-zip-compressed',
+    'application/pdf',
+    'image/',
+    'video/',
+    'audio/',
+    'font/',
+    'model/'
+  ];
+  
+  return binaryContentTypes.some(type => contentHeader.startsWith(type));
 }
 
-function isGzipped(headers: Headers): boolean {
+export function isBinary(headers: Headers): boolean {
   const encodingHeader = headers.get('content-encoding') ?? '';
   const contentHeader = headers.get('content-type') ?? '';
-  return encodingHeader.indexOf('gzip') >= 0 ||
-    contentHeader.indexOf('gzip') >= 0;
+  
+  // Check for gzip encoding
+  if (encodingHeader.indexOf('gzip') >= 0 || contentHeader.indexOf('gzip') >= 0) {
+    return true;
+  }
+  
+  // Check for common binary content types
+  const binaryContentTypes = [
+    'application/octet-stream',
+    'application/x-binary',
+    'application/x-chrome-extension',
+    'application/x-executable',
+    'application/x-msdownload',
+    'application/zip',
+    'application/x-zip-compressed',
+    'application/pdf',
+    'image/',
+    'video/',
+    'audio/',
+    'font/',
+    'model/'
+  ];
+  
+  return binaryContentTypes.some(type => contentHeader.startsWith(type));
 }
