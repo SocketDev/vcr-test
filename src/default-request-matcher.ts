@@ -8,6 +8,8 @@ export class DefaultRequestMatcher implements IRequestMatcher {
   public indexOf(calls: HttpInteraction[], request: HttpRequest): number {
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i];
+      if (!call) continue;
+      
       if (!this.urlEqual(call.request, request))
         continue;
 
