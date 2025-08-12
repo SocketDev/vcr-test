@@ -139,7 +139,7 @@ export class Cassette {
       body = readable;
     }
 
-    request.respondWith(new Response(body, {
+    request.respondWith(new Response(body as BodyInit, {
       status: match.response.status,
       statusText: match.response.statusText,
       headers: match.response.headers,

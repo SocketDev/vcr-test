@@ -20,7 +20,7 @@ export class VCR {
   constructor (private readonly storage: ICassetteStorage) {}
 
   public async useCassette(name: string, action: () => Promise<void>) {
-    const mode = ENV_TO_RECORD_MODE[process.env.VCR_MODE ?? this.mode] ?? this.mode;
+    const mode = ENV_TO_RECORD_MODE[process.env['VCR_MODE'] ?? this.mode] ?? this.mode;
 
     var cassette = new Cassette(this.storage, this.matcher, name, mode, this.requestMasker, this.requestPassThrough);
     await cassette.mount();
