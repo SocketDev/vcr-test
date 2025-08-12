@@ -16,7 +16,7 @@
   },
   "author": "epignosisx",
   "repository": {
-    "url": "https://github.com/SocketDev/vcr-test"
+    "url": "git+https://github.com/SocketDev/vcr-test.git"
   },
   "license": "MIT",
   "devDependencies": {
