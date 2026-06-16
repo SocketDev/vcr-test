@@ -1,9 +1,25 @@
 import { test } from 'tap';
 import { join } from 'node:path';
-import { RecordMode, VCR } from './index';
+import { RecordMode, VCR, DefaultRequestMatcher, HttpInteraction, ICassetteStorage } from './index';
 import { FileStorage } from "./file-storage";
 import { unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+
+// In-memory cassette storage so tests can seed interactions and inspect what
+// gets saved without touching the filesystem.
+class MemoryStorage implements ICassetteStorage {
+  public readonly saved: Record<string, HttpInteraction[]> = {};
+
+  constructor(private readonly seed: Record<string, HttpInteraction[]> = {}) {}
+
+  async load(name: string): Promise<HttpInteraction[] | undefined> {
+    return this.seed[name];
+  }
+
+  async save(name: string, interactions: HttpInteraction[]): Promise<void> {
+    this.saved[name] = interactions;
+  }
+}
 
 // Helper functions to match axios API signature, minimizing the diff with the original code
 async function fetchPost(url: string, data: string, config?: any) {
@@ -212,8 +228,9 @@ test('cassette', async (t) => {
         t.equal(contentType, 'application/x-chrome-extension', 'Content-type should be chrome extension');
         
         // Import the binary detection function to test it directly
-        const { isBinary } = require('./cassette');
-        t.ok(isBinary(res.headers), 'isBinary should detect chrome extension as binary');
+        const { defaultBase64EncodeBody } = require('./cassette');
+        const contentEncoding = res.headers.get('content-encoding') ?? '';
+        t.ok(defaultBase64EncodeBody(contentType ?? '', contentEncoding, res.headers), 'defaultBase64EncodeBody should base64-encode a chrome extension body');
 
         const body = await res.arrayBuffer()
         // console.log('Response size:', body.byteLength, 'bytes');
@@ -336,6 +353,63 @@ test('cassette', async (t) => {
 
         t.equal(body.data, '{"name":"alex-update"}');
       });
+    });
+  });
+
+  t.test('base64EncodeBody option', async (t) => {
+    t.test('is honored on playback (decodes base64 the default would leave as text)', async (t) => {
+      // The body is base64 but the content-type is application/json, which the
+      // default policy stores/reads as verbatim text. Only a policy returning
+      // true will base64-decode it back into JSON on playback.
+      const url = 'https://example.test/data';
+      const seeded: HttpInteraction[] = [{
+        request: { url, method: 'GET', headers: {}, body: '' },
+        response: {
+          status: 200,
+          statusText: 'OK',
+          headers: { 'content-type': 'application/json' },
+          body: Buffer.from(JSON.stringify({ hello: 'world' })).toString('base64'),
+        },
+      }];
+      const storage = new MemoryStorage({ seed: seeded });
+
+      // Match on method + url only, so we don't have to reproduce the headers
+      // undici adds to the outgoing request.
+      const matcher = new DefaultRequestMatcher();
+      matcher.compareHeaders = false;
+      matcher.compareBody = false;
+
+      const vcr = new VCR(storage);
+      vcr.mode = RecordMode.none;
+      vcr.matcher = matcher;
+      vcr.base64EncodeBody = () => true;
+
+      await vcr.useCassette('seed', async () => {
+        const res = await fetch(url);
+        t.same(await res.json(), { hello: 'world' }, 'custom policy decoded the base64 body');
+      });
+    });
+
+    t.test('is honored on record (forces base64 storage of a JSON body)', async (t) => {
+      const storage = new MemoryStorage();
+
+      const vcr = new VCR(storage);
+      vcr.mode = RecordMode.once;
+      vcr.base64EncodeBody = () => true;
+
+      await vcr.useCassette('recorded', async () => {
+        await fetchPost('https://httpbin.org/post', JSON.stringify({ name: 'alex' }), {
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        });
+      });
+
+      const saved = storage.saved['recorded'] ?? [];
+      t.ok(saved.length > 0, 'an interaction was recorded');
+
+      const responseBody = saved[0]?.response.body ?? '';
+      t.notMatch(responseBody, /^\{/, 'JSON response was not stored as verbatim text');
+      const decoded = Buffer.from(responseBody, 'base64').toString('utf8');
+      t.match(decoded, /alex/, 'base64 body decodes back to the JSON payload');
     });
   });
 });

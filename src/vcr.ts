@@ -1,7 +1,7 @@
 import { setTimeout } from 'node:timers/promises';
-import { HttpRequestMasker, ICassetteStorage, IRequestMatcher, PassThroughHandler, RecordMode } from './types';
+import { Base64EncodeBody, HttpRequestMasker, ICassetteStorage, IRequestMatcher, PassThroughHandler, RecordMode } from './types';
 import { DefaultRequestMatcher } from './default-request-matcher';
-import { Cassette } from './cassette';
+import { Cassette, defaultBase64EncodeBody } from './cassette';
 
 const ENV_TO_RECORD_MODE: Record<string, RecordMode> = {
   [RecordMode.none]: RecordMode.none,
@@ -16,13 +16,14 @@ export class VCR {
   public requestMasker: HttpRequestMasker = () => {};
   public requestPassThrough?: PassThroughHandler;
   public mode: RecordMode = RecordMode.once;
+  public base64EncodeBody: Base64EncodeBody = defaultBase64EncodeBody;
 
   constructor (private readonly storage: ICassetteStorage) {}
 
   public async useCassette(name: string, action: () => Promise<void>) {
     const mode = ENV_TO_RECORD_MODE[process.env['VCR_MODE'] ?? this.mode] ?? this.mode;
 
-    var cassette = new Cassette(this.storage, this.matcher, name, mode, this.requestMasker, this.requestPassThrough);
+    var cassette = new Cassette(this.storage, this.matcher, name, mode, this.requestMasker, this.requestPassThrough, this.base64EncodeBody);
     await cassette.mount();
     try {
       await action();

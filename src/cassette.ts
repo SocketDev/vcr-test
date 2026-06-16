@@ -3,7 +3,7 @@ import { ClientRequestInterceptor } from '@mswjs/interceptors/ClientRequest';
 import { BatchInterceptor } from '@mswjs/interceptors'
 
 
-import { HttpInteraction, ICassetteStorage, IRequestMatcher, RecordMode, HttpRequest, HttpResponse, HttpRequestMasker, PassThroughHandler } from './types';
+import { HttpInteraction, ICassetteStorage, IRequestMatcher, RecordMode, HttpRequest, HttpResponse, HttpRequestMasker, PassThroughHandler, Base64EncodeBody } from './types';
 import { Readable } from 'node:stream';
 import assert from 'node:assert';
 
@@ -29,6 +29,7 @@ export class Cassette {
     private readonly mode: RecordMode,
     private readonly masker: HttpRequestMasker,
     private readonly passThroughHandler: PassThroughHandler | undefined,
+    private readonly base64EncodeBody: Base64EncodeBody = defaultBase64EncodeBody,
   ) {}
 
   public isDone(): boolean {
@@ -83,8 +84,8 @@ export class Cassette {
       
       const res: Response = response.clone();
 
-      const httpRequest = requestToHttpRequest(req, await consumeBody(req));
-      const httpResponse = responseToHttpResponse(res, await consumeBody(res));
+      const httpRequest = requestToHttpRequest(req, await consumeBody(req, this.base64EncodeBody));
+      const httpResponse = responseToHttpResponse(res, await consumeBody(res, this.base64EncodeBody));
 
       this.masker(httpRequest);
 
@@ -121,7 +122,7 @@ export class Cassette {
 
   private async playback(request: any): Promise<void> {
     const req = request.clone();
-    const httpRequest = requestToHttpRequest(req, await consumeBody(req));
+    const httpRequest = requestToHttpRequest(req, await consumeBody(req, this.base64EncodeBody));
     this.masker?.(httpRequest);
     const match = this.findMatch(httpRequest);
     if (!match) {
@@ -131,7 +132,7 @@ export class Cassette {
     this.usedInteractions.add(match);
 
     let body: string | Readable = match.response.body;
-    if (isBinaryMatch(match.response.headers)) {
+    if (shouldBase64(match.response.headers, this.base64EncodeBody)) {
       const readable = new Readable();
       readable._read = () => {};
       readable.push(Buffer.from(match.response.body, 'base64'));
@@ -158,7 +159,7 @@ export class Cassette {
   private async isPassThrough(request: any) {
     if (this.passThroughHandler) {
       const req = request.clone();
-      const httpRequest = requestToHttpRequest(req, await consumeBody(req));
+      const httpRequest = requestToHttpRequest(req, await consumeBody(req, this.base64EncodeBody));
       return this.passThroughHandler(httpRequest);
     }
     return false;
@@ -211,8 +212,11 @@ export function responseToHttpResponse(response: any, body: string): HttpRespons
   }
 }
 
-export async function consumeBody(req: Request | Response) {
-  if (isBinary(req.headers)) {
+export async function consumeBody(
+  req: Request | Response,
+  base64EncodeBody: Base64EncodeBody = defaultBase64EncodeBody,
+) {
+  if (shouldBase64(req.headers, base64EncodeBody)) {
     return Buffer.from(await req.arrayBuffer()).toString('base64');
   }
 
@@ -229,7 +233,7 @@ export async function consumeBody(req: Request | Response) {
 }
 
 // Content types we know are text and can store verbatim in the cassette.
-// Anything not on this list is treated as binary (see isBinaryContent), so the
+// Anything not on this list is base64-encoded (see defaultBase64EncodeBody), so the
 // failure mode is "readable text stored as base64" rather than "binary corrupted".
 const TEXT_CONTENT_TYPES = [
   'application/json',
@@ -254,8 +258,31 @@ function isTextContentType(type: string): boolean {
   return TEXT_CONTENT_TYPE_SUFFIXES.some((suffix) => type.endsWith(suffix));
 }
 
-// Shared core: a payload is binary unless we positively recognise it as text.
-function isBinaryContent(contentType: string, contentEncoding: string): boolean {
+// Reads a header from either a live `Headers` instance (case-insensitive) or a
+// recorded plain record (keys are already lower-cased by responseToHttpResponse).
+function getHeader(headers: Headers | Record<string, string>, name: string): string {
+  if (headers instanceof Headers) {
+    return headers.get(name) ?? '';
+  }
+  return headers[name] ?? '';
+}
+
+// Extracts content-type/content-encoding from the headers and delegates to the
+// configured policy.
+function shouldBase64(
+  headers: Headers | Record<string, string>,
+  base64EncodeBody: Base64EncodeBody,
+): boolean {
+  return base64EncodeBody(
+    getHeader(headers, 'content-type'),
+    getHeader(headers, 'content-encoding'),
+    headers,
+  );
+}
+
+// Default policy: a body is base64-encoded unless we positively recognise it as text.
+// Override via `VCR#base64EncodeBody` to customise.
+export const defaultBase64EncodeBody: Base64EncodeBody = (contentType, contentEncoding) => {
   // Force gzip-encoded payloads to base64 storage. NOTE: by the time we observe
   // the body the HTTP client (undici/Node http) has usually already decompressed
   // it, so the bytes here are typically the decoded *text*, not gzip — this isn't
@@ -274,18 +301,4 @@ function isBinaryContent(contentType: string, contentEncoding: string): boolean 
   }
 
   return !isTextContentType(type);
-}
-
-function isBinaryMatch(headers: Record<string, string>): boolean {
-  return isBinaryContent(
-    headers['content-type'] ?? '',
-    headers['content-encoding'] ?? ''
-  );
-}
-
-export function isBinary(headers: Headers): boolean {
-  return isBinaryContent(
-    headers.get('content-type') ?? '',
-    headers.get('content-encoding') ?? ''
-  );
-}
+};
