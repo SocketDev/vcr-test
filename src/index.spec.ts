@@ -180,13 +180,13 @@ test('cassette', async (t) => {
           }
         })
         const body = await res.arrayBuffer()
-        console.log(body)
+        // console.log(body)
 
-        const utf8Text = new TextDecoder().decode(body)
-        console.log(utf8Text.slice(0, 100))
+        // const utf8Text = new TextDecoder().decode(body)
+        // console.log(utf8Text.slice(0, 100))
 
         const base64 = Buffer.from(body).toString('base64')
-        console.log(base64.slice(0, 100))
+        // console.log(base64.slice(0, 100))
 
         t.equal(base64.slice(0, 10), 'H4sICAAAAA');
         t.equal(base64.slice(-10), '+W2QBgCAA=');
@@ -206,7 +206,7 @@ test('cassette', async (t) => {
         // Verify it's a binary response
         const contentType = res.headers.get('content-type');
         t.ok(contentType, 'Response should have content-type header');
-        console.log('Content-Type:', contentType);
+        // console.log('Content-Type:', contentType);
         
         // Test that our binary detection is working
         t.equal(contentType, 'application/x-chrome-extension', 'Content-type should be chrome extension');
@@ -216,11 +216,11 @@ test('cassette', async (t) => {
         t.ok(isBinary(res.headers), 'isBinary should detect chrome extension as binary');
 
         const body = await res.arrayBuffer()
-        console.log('Response size:', body.byteLength, 'bytes');
+        // console.log('Response size:', body.byteLength, 'bytes');
 
         // Verify it's stored as base64 in the cassette
         const base64 = Buffer.from(body).toString('base64')
-        console.log('Base64 length:', base64.length);
+        // console.log('Base64 length:', base64.length);
 
         // Verify it's a valid binary file (should start with common binary signatures)
         t.ok(body.byteLength > 0, 'Response should have content');
