@@ -3,7 +3,7 @@ import { ClientRequestInterceptor } from '@mswjs/interceptors/ClientRequest';
 import { BatchInterceptor } from '@mswjs/interceptors'
 
 
-import { HttpInteraction, ICassetteStorage, IRequestMatcher, RecordMode, HttpRequest, HttpResponse, HttpRequestMasker, PassThroughHandler } from './types';
+import { HttpInteraction, ICassetteStorage, IRequestMatcher, RecordMode, HttpRequest, HttpResponse, HttpRequestMasker, PassThroughHandler, Base64EncodeBody } from './types';
 import { Readable } from 'node:stream';
 import assert from 'node:assert';
 
@@ -29,6 +29,7 @@ export class Cassette {
     private readonly mode: RecordMode,
     private readonly masker: HttpRequestMasker,
     private readonly passThroughHandler: PassThroughHandler | undefined,
+    private readonly base64EncodeBody: Base64EncodeBody = defaultBase64EncodeBody,
   ) {}
 
   public isDone(): boolean {
@@ -83,8 +84,8 @@ export class Cassette {
       
       const res: Response = response.clone();
 
-      const httpRequest = requestToHttpRequest(req, await consumeBody(req));
-      const httpResponse = responseToHttpResponse(res, await consumeBody(res));
+      const httpRequest = requestToHttpRequest(req, await consumeBody(req, this.base64EncodeBody));
+      const httpResponse = responseToHttpResponse(res, await consumeBody(res, this.base64EncodeBody));
 
       this.masker(httpRequest);
 
@@ -121,7 +122,7 @@ export class Cassette {
 
   private async playback(request: any): Promise<void> {
     const req = request.clone();
-    const httpRequest = requestToHttpRequest(req, await consumeBody(req));
+    const httpRequest = requestToHttpRequest(req, await consumeBody(req, this.base64EncodeBody));
     this.masker?.(httpRequest);
     const match = this.findMatch(httpRequest);
     if (!match) {
@@ -131,7 +132,7 @@ export class Cassette {
     this.usedInteractions.add(match);
 
     let body: string | Readable = match.response.body;
-    if (isBinaryMatch(match.response.headers)) {
+    if (shouldBase64(match.response.headers, this.base64EncodeBody)) {
       const readable = new Readable();
       readable._read = () => {};
       readable.push(Buffer.from(match.response.body, 'base64'));
@@ -158,7 +159,7 @@ export class Cassette {
   private async isPassThrough(request: any) {
     if (this.passThroughHandler) {
       const req = request.clone();
-      const httpRequest = requestToHttpRequest(req, await consumeBody(req));
+      const httpRequest = requestToHttpRequest(req, await consumeBody(req, this.base64EncodeBody));
       return this.passThroughHandler(httpRequest);
     }
     return false;
@@ -211,76 +212,93 @@ export function responseToHttpResponse(response: any, body: string): HttpRespons
   }
 }
 
-export async function consumeBody(req: Request | Response) {
-  if (isBinary(req.headers)) {
+export async function consumeBody(
+  req: Request | Response,
+  base64EncodeBody: Base64EncodeBody = defaultBase64EncodeBody,
+) {
+  if (shouldBase64(req.headers, base64EncodeBody)) {
     return Buffer.from(await req.arrayBuffer()).toString('base64');
-  } else {
+  }
+
+  const contentLength = req.headers.get('content-length');
+  if (contentLength && parseInt(contentLength) > 1024 * 1024) { // > 1MB
     const contentType = req.headers.get('content-type') ?? '???';
-    const contentLength = req.headers.get('content-length');
-    
-    // Log potential streaming responses that aren't covered
-    if (contentLength && parseInt(contentLength) > 1024 * 1024) { // > 1MB
-      console.warn(`VCR: Large response detected (${contentLength} bytes) with content-type: ${contentType}. Consider adding this content-type to binary detection if it's a streaming response.`);
-    }
-    
-    return await req.text()
+    // Recognised text types are stored verbatim, so a large one is inlined into
+    // the cassette as-is and bloats it. If this is really a streamed/binary
+    // payload mislabelled as text, give it a binary content-type instead.
+    console.warn(`VCR: Large response detected (${contentLength} bytes) with content-type: ${contentType}. It will be inlined into the cassette as text; if it is actually binary/streamed, serve it with a binary content-type.`);
   }
+
+  return await req.text();
 }
 
-function isBinaryMatch(headers: Record<string, string>): boolean {
-  const encodingHeader = headers['content-encoding'] ?? '';
-  const contentHeader = headers['content-type'] ?? '';
-  
-  // Check for gzip encoding
-  if (encodingHeader.indexOf('gzip') >= 0 || contentHeader.indexOf('gzip') >= 0) {
+// Content types we know are text and can store verbatim in the cassette.
+// Anything not on this list is base64-encoded (see defaultBase64EncodeBody), so the
+// failure mode is "readable text stored as base64" rather than "binary corrupted".
+const TEXT_CONTENT_TYPES = [
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/ecmascript',
+  'application/x-www-form-urlencoded',
+  'application/graphql',
+  'application/csp-report',
+];
+
+// Structured-syntax suffixes that are always text (e.g. image/svg+xml, application/ld+json).
+const TEXT_CONTENT_TYPE_SUFFIXES = ['+json', '+xml'];
+
+function isTextContentType(type: string): boolean {
+  if (type.startsWith('text/')) {
     return true;
   }
-  
-  // Check for common binary content types
-  const binaryContentTypes = [
-    'application/octet-stream',
-    'application/x-binary',
-    'application/x-chrome-extension',
-    'application/x-executable',
-    'application/x-msdownload',
-    'application/zip',
-    'application/x-zip-compressed',
-    'application/pdf',
-    'image/',
-    'video/',
-    'audio/',
-    'font/',
-    'model/'
-  ];
-  
-  return binaryContentTypes.some(type => contentHeader.startsWith(type));
+  if (TEXT_CONTENT_TYPES.includes(type)) {
+    return true;
+  }
+  return TEXT_CONTENT_TYPE_SUFFIXES.some((suffix) => type.endsWith(suffix));
 }
 
-export function isBinary(headers: Headers): boolean {
-  const encodingHeader = headers.get('content-encoding') ?? '';
-  const contentHeader = headers.get('content-type') ?? '';
-  
-  // Check for gzip encoding
-  if (encodingHeader.indexOf('gzip') >= 0 || contentHeader.indexOf('gzip') >= 0) {
+// Reads a header from either a live `Headers` instance (case-insensitive) or a
+// recorded plain record (keys are already lower-cased by responseToHttpResponse).
+function getHeader(headers: Headers | Record<string, string>, name: string): string {
+  if (headers instanceof Headers) {
+    return headers.get(name) ?? '';
+  }
+  return headers[name] ?? '';
+}
+
+// Extracts content-type/content-encoding from the headers and delegates to the
+// configured policy.
+function shouldBase64(
+  headers: Headers | Record<string, string>,
+  base64EncodeBody: Base64EncodeBody,
+): boolean {
+  return base64EncodeBody(
+    getHeader(headers, 'content-type'),
+    getHeader(headers, 'content-encoding'),
+    headers,
+  );
+}
+
+// Default policy: a body is base64-encoded unless we positively recognise it as text.
+// Override via `VCR#base64EncodeBody` to customise.
+export const defaultBase64EncodeBody: Base64EncodeBody = (contentType, contentEncoding) => {
+  // Force gzip-encoded payloads to base64 storage. NOTE: by the time we observe
+  // the body the HTTP client (undici/Node http) has usually already decompressed
+  // it, so the bytes here are typically the decoded *text*, not gzip — this isn't
+  // detecting binary, it's just pinning the storage representation. Record and
+  // playback both key off this same header, so the round-trip stays consistent.
+  if (contentEncoding.indexOf('gzip') >= 0 || contentType.indexOf('gzip') >= 0) {
     return true;
   }
-  
-  // Check for common binary content types
-  const binaryContentTypes = [
-    'application/octet-stream',
-    'application/x-binary',
-    'application/x-chrome-extension',
-    'application/x-executable',
-    'application/x-msdownload',
-    'application/zip',
-    'application/x-zip-compressed',
-    'application/pdf',
-    'image/',
-    'video/',
-    'audio/',
-    'font/',
-    'model/'
-  ];
-  
-  return binaryContentTypes.some(type => contentHeader.startsWith(type));
-}
+
+  // Strip any parameters (e.g. "; charset=utf-8") and normalise.
+  const type = (contentType.split(';')[0] ?? '').trim().toLowerCase();
+
+  // No declared content type → assume text, keeping empty/plain bodies readable.
+  if (!type) {
+    return false;
+  }
+
+  return !isTextContentType(type);
+};

@@ -83,3 +83,18 @@ export type HttpRequestMasker = (httpRequest: HttpRequest) => void;
  * A function that allows an HTTP request to pass through (never be recorded)
  */
 export type PassThroughHandler = (httpRequest: HttpRequest) => boolean;
+
+/**
+ * Decides whether a request/response body should be stored base64-encoded
+ * (returning `true`) rather than as verbatim text.
+ *
+ * `contentType` and `contentEncoding` are pre-extracted for convenience; the full
+ * `headers` are also provided (either as a `Headers` instance for live traffic, or
+ * a plain record for a recorded cassette interaction) so custom policies can
+ * inspect other headers if needed.
+ */
+export type Base64EncodeBody = (
+  contentType: string,
+  contentEncoding: string,
+  headers: Headers | Record<string, string>,
+) => boolean;

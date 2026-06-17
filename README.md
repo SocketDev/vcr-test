@@ -202,6 +202,35 @@ vcr.requestPassThrough = (req) => {
 };
 ```
 
+### Body storage encoding
+Bodies are stored in the cassette as readable text by default, but binary payloads (images, archives, executables, etc.) are base64-encoded so they survive the round-trip without corruption. VCR decides which encoding to use from the body's `content-type` (and `content-encoding`) headers.
+
+The default policy, `defaultBase64EncodeBody`, stores a body as **text** only when its content-type is a recognised text type (`text/*`, `application/json`, `application/xml`, the `+json` / `+xml` structured-syntax suffixes, `application/x-www-form-urlencoded`, etc.) and **base64-encodes** everything else. This way the safe failure mode is "readable text stored as base64" rather than "binary corrupted into text".
+
+If you need different behavior — for example, a custom API content-type that is actually text, or forcing a type to be base64-encoded — assign your own policy. It returns `true` to base64-encode the body:
+
+```ts
+import { VCR, defaultBase64EncodeBody } from 'socket-vcr-test';
+
+const vcr = new VCR(...);
+
+// Wrap the default and add your own rules.
+// `contentType` and `contentEncoding` are pre-extracted from the headers;
+// `headers` (a `Headers` instance for live traffic, or a plain record for a
+// recorded interaction) are also passed in case you need other header values.
+vcr.base64EncodeBody = (contentType, contentEncoding, headers) => {
+  // Force our custom protobuf type to be base64-encoded...
+  if (contentType.startsWith('application/x-acme-proto')) {
+    return true;
+  }
+
+  // ...and fall back to the built-in policy for everything else.
+  return defaultBase64EncodeBody(contentType, contentEncoding, headers);
+};
+```
+
+The policy runs on **both** recording and playback, so it must make the same decision in each phase — otherwise a body stored as base64 could be replayed as text (or vice versa). Keep it stable for a given cassette.
+
 ## FAQ
 ### How can I pretty print JSON bodies?
 
